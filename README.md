@@ -16,6 +16,33 @@ ROS 2 `ros2_control` hardware plugin for Piper gripper over raw SocketCAN, witho
 colcon build --packages-select piper_gripper_hardware
 ```
 
+## Quick CAN debug helpers
+
+Two helper scripts are included:
+
+- `scripts/can_activate.sh`
+  - bring CAN interface up/down with bitrate settings
+  - supports classic CAN and CAN-FD mode
+- `scripts/piper_gripper_cansend.sh`
+  - send basic gripper debug commands via `cansend`
+  - includes `monitor` mode (`candump`) for feedback ID filtering
+
+Examples:
+
+```bash
+# 1) Bring up can0
+./scripts/can_activate.sh --iface can0 --bitrate 1000000
+
+# 2) Enable gripper and clear faults
+./scripts/piper_gripper_cansend.sh --iface can0 enable-clear
+
+# 3) Move gripper to 30 mm
+./scripts/piper_gripper_cansend.sh --iface can0 move --pos-m 0.03
+
+# 4) Monitor feedback frames (default 0x2A8)
+./scripts/piper_gripper_cansend.sh --iface can0 monitor
+```
+
 ## ros2_control URDF snippet
 
 ```xml
