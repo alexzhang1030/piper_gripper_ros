@@ -16,6 +16,33 @@ ROS 2 `ros2_control` hardware plugin for Piper gripper over raw SocketCAN, witho
 colcon build --packages-select piper_gripper_hardware
 ```
 
+## Quick CAN debug helpers
+
+Two helper scripts are included:
+
+- `scripts/can_activate.sh`
+  - bring CAN interface up/down with bitrate settings
+  - supports classic CAN and CAN-FD mode
+- `scripts/piper_gripper_cansend.sh`
+  - send basic gripper debug commands via `cansend`
+  - includes `monitor` mode (`candump`) for feedback ID filtering
+
+Examples:
+
+```bash
+# 1) Bring up can0
+./scripts/can_activate.sh --iface can0 --bitrate 1000000
+
+# 2) Enable gripper and clear faults
+./scripts/piper_gripper_cansend.sh --iface can0 enable-clear
+
+# 3) Move gripper to 30 mm
+./scripts/piper_gripper_cansend.sh --iface can0 move --pos-m 0.03
+
+# 4) Monitor feedback frames (default 0x2A8)
+./scripts/piper_gripper_cansend.sh --iface can0 monitor
+```
+
 ## ros2_control URDF snippet
 
 ```xml
@@ -60,7 +87,21 @@ colcon build --packages-select piper_gripper_hardware
   - `~/gripper_sent_position_debug` + `~/gripper_sent_position_debug_stamped`
   - `~/gripper_feedback_debug` + `~/gripper_feedback_debug_stamped`
 
+## Notes and caveats
+
+- In most single-arm setups, only `can_interface` changes (`can0`, `can1`, ...).
+- `command_can_id` / `feedback_can_id` are usually fixed defaults:
+  - `command_can_id = 0x159`
+  - `feedback_can_id = 0x2A8`
+- If the arm was configured with master/slave offset command `0x470`, CAN IDs can shift:
+  - Control base can shift `15x -> 16x/17x` (gripper command may become `0x169/0x179`)
+  - Feedback base can shift `2Ax -> 2Bx/2Cx` (gripper feedback may become `0x2B8/0x2C8`)
+- In offset mode, update `command_can_id` and `feedback_can_id` params accordingly.
+- Quick check recommendation:
+  - sniff bus first (`candump`) and confirm the real gripper TX/RX IDs
+  - then align ros2_control params with observed IDs
+
 ## CI note
 
-GitHub Actions checks out `alexzhang1030/ros_std_msgs_stamped` into `src/ros_std_msgs_stamped` so
+GitHub Actions checks out `alexzhang1030/ros_std_msgs_stamped` into `std_msgs_stamped_src` so
 `std_msgs_stamped` is available during CI build.
