@@ -60,7 +60,21 @@ colcon build --packages-select piper_gripper_hardware
   - `~/gripper_sent_position_debug` + `~/gripper_sent_position_debug_stamped`
   - `~/gripper_feedback_debug` + `~/gripper_feedback_debug_stamped`
 
+## Notes and caveats
+
+- In most single-arm setups, only `can_interface` changes (`can0`, `can1`, ...).
+- `command_can_id` / `feedback_can_id` are usually fixed defaults:
+  - `command_can_id = 0x159`
+  - `feedback_can_id = 0x2A8`
+- If the arm was configured with master/slave offset command `0x470`, CAN IDs can shift:
+  - Control base can shift `15x -> 16x/17x` (gripper command may become `0x169/0x179`)
+  - Feedback base can shift `2Ax -> 2Bx/2Cx` (gripper feedback may become `0x2B8/0x2C8`)
+- In offset mode, update `command_can_id` and `feedback_can_id` params accordingly.
+- Quick check recommendation:
+  - sniff bus first (`candump`) and confirm the real gripper TX/RX IDs
+  - then align ros2_control params with observed IDs
+
 ## CI note
 
-GitHub Actions checks out `alexzhang1030/ros_std_msgs_stamped` into `src/ros_std_msgs_stamped` so
+GitHub Actions checks out `alexzhang1030/ros_std_msgs_stamped` into `std_msgs_stamped_src` so
 `std_msgs_stamped` is available during CI build.
