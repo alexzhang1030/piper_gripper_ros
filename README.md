@@ -31,6 +31,10 @@ colcon build --packages-select piper_gripper_hardware
     <param name="default_effort_mn">1000</param>
     <param name="feedback_timeout_ms">1000</param>
     <param name="command_refresh_interval_ms">100</param>
+    <param name="publish_debug_commands">false</param>
+    <param name="publish_sent_position">false</param>
+    <param name="publish_feedback_position">false</param>
+    <param name="debug_topic_prefix"></param>
   </hardware>
 
   <joint name="gripper_joint">
@@ -51,3 +55,12 @@ colcon build --packages-select piper_gripper_hardware
 - Deactivate sends `status=0x00` (disable).
 - Command input is `position` in meters, converted to protocol unit (`1e-6 m` per count).
 - Exposes feedback: position, effort, status_code, enabled, homed, fault.
+- Optional debug topics:
+  - `~/gripper_command_debug` + `~/gripper_command_debug_stamped`
+  - `~/gripper_sent_position_debug` + `~/gripper_sent_position_debug_stamped`
+  - `~/gripper_feedback_debug` + `~/gripper_feedback_debug_stamped`
+
+## CI note
+
+GitHub Actions checks out `alexzhang1030/ros_std_msgs_stamped` into `src/ros_std_msgs_stamped` so
+`std_msgs_stamped` is available during CI build.

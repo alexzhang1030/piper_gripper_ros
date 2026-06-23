@@ -21,8 +21,15 @@
 #endif
 #include "rclcpp/clock.hpp"
 #include "rclcpp/duration.hpp"
+#include "rclcpp/node.hpp"
+#include "rclcpp/publisher.hpp"
+#include "rclcpp/qos.hpp"
 #include "rclcpp/time.hpp"
 #include "rclcpp_lifecycle/state.hpp"
+#include "std_msgs/msg/float64.hpp"
+#include "std_msgs/msg/u_int8_multi_array.hpp"
+#include "std_msgs_stamped/msg/stamped_float64.hpp"
+#include "std_msgs_stamped/msg/stamped_u_int8_multi_array.hpp"
 
 #include "piper_gripper_hardware/can_socket.hpp"
 #include "piper_gripper_hardware/piper_gripper_protocol.hpp"
@@ -64,7 +71,16 @@ private:
   auto get_parameter_or(const std::string& name, const std::string& fallback) const -> std::string;
   auto get_parameter_or(const std::string& name, int fallback) const -> int;
   auto get_parameter_or(const std::string& name, double fallback) const -> double;
+  auto get_parameter_or(const std::string& name, bool fallback) const -> bool;
+  auto debug_node() -> rclcpp::Node::SharedPtr;
+  static auto make_debug_topic_name(const std::string& prefix, const std::string& base_name) -> std::string;
+  void publish_command_debug_frame(const can_frame& frame);
+  void publish_sent_position_value(double position);
+  void publish_feedback_position_frame(const can_frame& frame);
 
+#ifndef PIPER_GRIPPER_HAS_HARDWARE_COMPONENT_INTERFACE_PARAMS
+  rclcpp::Node::SharedPtr debug_node_;
+#endif
   std::shared_ptr<rclcpp::Clock> clock_;
   std::unique_ptr<CanSocket> can_socket_;
   std::thread receive_thread_;
@@ -83,6 +99,17 @@ private:
   int feedback_timeout_ms_{1000};
   int command_refresh_interval_ms_{100};
   int activate_set_zero_{0};
+  bool publish_debug_commands_{false};
+  bool publish_sent_position_{false};
+  bool publish_feedback_position_{false};
+  std::string debug_topic_prefix_;
+
+  rclcpp::Publisher<std_msgs::msg::UInt8MultiArray>::SharedPtr command_debug_publisher_;
+  rclcpp::Publisher<std_msgs_stamped::msg::StampedUInt8MultiArray>::SharedPtr stamped_command_debug_publisher_;
+  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr sent_position_publisher_;
+  rclcpp::Publisher<std_msgs_stamped::msg::StampedFloat64>::SharedPtr stamped_sent_position_publisher_;
+  rclcpp::Publisher<std_msgs::msg::UInt8MultiArray>::SharedPtr feedback_position_publisher_;
+  rclcpp::Publisher<std_msgs_stamped::msg::StampedUInt8MultiArray>::SharedPtr stamped_feedback_position_publisher_;
 
   std::mutex can_send_mutex_;
   std::atomic<std::uint64_t> last_feedback_time_ms_{0};
