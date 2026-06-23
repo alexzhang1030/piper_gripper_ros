@@ -17,6 +17,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Checkout std_msgs_stamped
+        uses: actions/checkout@v4
+        with:
+          repository: alexzhang1030/ros_std_msgs_stamped
+          path: src/ros_std_msgs_stamped
+
       - name: Install build dependencies
         run: |
           apt-get update
@@ -38,4 +44,4 @@ jobs:
       - name: Build
         run: |
           . /opt/ros/jazzy/setup.sh
-          colcon build --event-handlers console_direct+ --packages-select piper_gripper_hardware
+          colcon build --event-handlers console_direct+ --packages-up-to piper_gripper_hardware

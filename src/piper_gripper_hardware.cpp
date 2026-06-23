@@ -3,13 +3,16 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <limits>
 #include <memory>
 #include <rclcpp/logging.hpp>
+#include <rclcpp/qos.hpp>
 #include <rclcpp/utilities.hpp>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -27,6 +30,33 @@ auto logger() -> rclcpp::Logger
 auto now_ms(rclcpp::Clock& clock) -> std::uint64_t
 {
   return static_cast<std::uint64_t>(clock.now().nanoseconds() / 1'000'000);
+}
+
+auto parse_bool_parameter(std::string_view value, bool fallback) -> bool
+{
+  if (value == "true" || value == "True" || value == "TRUE" || value == "1") {
+    return true;
+  }
+  if (value == "false" || value == "False" || value == "FALSE" || value == "0") {
+    return false;
+  }
+  return fallback;
+}
+
+auto frame_to_debug_payload(const can_frame& frame) -> std::vector<std::uint8_t>
+{
+  std::vector<std::uint8_t> payload;
+  payload.reserve(13);
+  const auto can_id = frame.can_id & CAN_EFF_MASK;
+  payload.push_back(static_cast<std::uint8_t>(can_id & 0xFFU));
+  payload.push_back(static_cast<std::uint8_t>((can_id >> 8U) & 0xFFU));
+  payload.push_back(static_cast<std::uint8_t>((can_id >> 16U) & 0xFFU));
+  payload.push_back(static_cast<std::uint8_t>((can_id >> 24U) & 0xFFU));
+  payload.push_back(frame.can_dlc);
+  for (std::size_t index = 0; index < 8; ++index) {
+    payload.push_back(frame.data[index]);
+  }
+  return payload;
 }
 }  // namespace
 
@@ -64,6 +94,10 @@ auto PiperGripperHardware::on_init(const hardware_interface::HardwareInfo& info)
   feedback_timeout_ms_ = std::max(1, get_parameter_or("feedback_timeout_ms", feedback_timeout_ms_));
   command_refresh_interval_ms_ = std::max(1, get_parameter_or("command_refresh_interval_ms", command_refresh_interval_ms_));
   activate_set_zero_ = get_parameter_or("activate_set_zero", activate_set_zero_);
+  publish_debug_commands_ = get_parameter_or("publish_debug_commands", publish_debug_commands_);
+  publish_sent_position_ = get_parameter_or("publish_sent_position", publish_sent_position_);
+  publish_feedback_position_ = get_parameter_or("publish_feedback_position", publish_feedback_position_);
+  debug_topic_prefix_ = get_parameter_or("debug_topic_prefix", debug_topic_prefix_);
 
   if (min_position_m_ > max_position_m_) {
     std::swap(min_position_m_, max_position_m_);
@@ -73,12 +107,44 @@ auto PiperGripperHardware::on_init(const hardware_interface::HardwareInfo& info)
   hw_command_position_ = initial_position_m_;
   hw_position_export_ = initial_position_m_;
 
+  if (publish_debug_commands_) {
+    command_debug_publisher_ = debug_node()->create_publisher<std_msgs::msg::UInt8MultiArray>(
+        make_debug_topic_name(debug_topic_prefix_, "gripper_command_debug"), rclcpp::SystemDefaultsQoS{});
+    stamped_command_debug_publisher_ = debug_node()->create_publisher<std_msgs_stamped::msg::StampedUInt8MultiArray>(
+        make_debug_topic_name(debug_topic_prefix_, "gripper_command_debug_stamped"), rclcpp::SystemDefaultsQoS{});
+  }
+  if (publish_sent_position_) {
+    sent_position_publisher_ = debug_node()->create_publisher<std_msgs::msg::Float64>(
+        make_debug_topic_name(debug_topic_prefix_, "gripper_sent_position_debug"), rclcpp::SystemDefaultsQoS{});
+    stamped_sent_position_publisher_ = debug_node()->create_publisher<std_msgs_stamped::msg::StampedFloat64>(
+        make_debug_topic_name(debug_topic_prefix_, "gripper_sent_position_debug_stamped"), rclcpp::SystemDefaultsQoS{});
+  }
+  if (publish_feedback_position_) {
+    feedback_position_publisher_ = debug_node()->create_publisher<std_msgs::msg::UInt8MultiArray>(
+        make_debug_topic_name(debug_topic_prefix_, "gripper_feedback_debug"), rclcpp::SystemDefaultsQoS{});
+    stamped_feedback_position_publisher_ =
+        debug_node()->create_publisher<std_msgs_stamped::msg::StampedUInt8MultiArray>(
+            make_debug_topic_name(debug_topic_prefix_, "gripper_feedback_debug_stamped"), rclcpp::SystemDefaultsQoS{});
+  }
+
   clock_ = std::make_shared<rclcpp::Clock>(RCL_ROS_TIME);
   RCLCPP_INFO(logger(),
               "on_init: interface=%s cmd_id=0x%X fb_id=0x%X range=[%.4f, %.4f] initial=%.4f effort=%d",
               can_interface_.c_str(), command_can_id_, feedback_can_id_, min_position_m_, max_position_m_,
               initial_position_m_, default_effort_mn_);
   return CallbackReturn::SUCCESS;
+}
+
+auto PiperGripperHardware::debug_node() -> rclcpp::Node::SharedPtr
+{
+#ifdef PIPER_GRIPPER_HAS_HARDWARE_COMPONENT_INTERFACE_PARAMS
+  return get_node();
+#else
+  if (debug_node_ == nullptr) {
+    debug_node_ = std::make_shared<rclcpp::Node>("piper_gripper_hardware_debug");
+  }
+  return debug_node_;
+#endif
 }
 
 PiperGripperHardware::~PiperGripperHardware()
@@ -256,6 +322,7 @@ void PiperGripperHardware::receive_loop()
     if (!feedback.has_value()) {
       continue;
     }
+    publish_feedback_position_frame(frame);
 
     hw_position_ = std::clamp(feedback->position_m, min_position_m_, max_position_m_);
     hw_effort_ = feedback->effort_nm;
@@ -293,6 +360,8 @@ auto PiperGripperHardware::send_gripper_command(std::uint8_t status_code, std::u
     RCLCPP_WARN_THROTTLE(logger(), *clock_, 1000, "CAN TX queue full, will retry next control cycle.");
     return result;
   }
+  publish_command_debug_frame(frame);
+  publish_sent_position_value(clamped);
   last_command_time_ms_ = now_ms(*clock_);
   return result;
 }
@@ -313,6 +382,94 @@ auto PiperGripperHardware::get_parameter_or(const std::string& name, double fall
 {
   const auto iter = info_.hardware_parameters.find(name);
   return iter == info_.hardware_parameters.end() ? fallback : std::stod(iter->second);
+}
+
+auto PiperGripperHardware::get_parameter_or(const std::string& name, bool fallback) const -> bool
+{
+  const auto iter = info_.hardware_parameters.find(name);
+  return iter == info_.hardware_parameters.end() ? fallback : parse_bool_parameter(iter->second, fallback);
+}
+
+auto PiperGripperHardware::make_debug_topic_name(const std::string& prefix, const std::string& base_name) -> std::string
+{
+  if (prefix.empty()) {
+    return "~/" + base_name;
+  }
+  std::string_view p = prefix;
+  if (p.front() == '/') {
+    p.remove_prefix(1);
+  }
+
+  std::string result = "~/";
+  result += p;
+  if (result.back() != '/') {
+    result += '/';
+  }
+  result += base_name;
+  return result;
+}
+
+void PiperGripperHardware::publish_command_debug_frame(const can_frame& frame)
+{
+  if (!publish_debug_commands_) {
+    return;
+  }
+  const auto payload = frame_to_debug_payload(frame);
+  const auto stamp = clock_->now();
+  if (command_debug_publisher_ != nullptr) {
+    std_msgs::msg::UInt8MultiArray msg{};
+    msg.data = payload;
+    command_debug_publisher_->publish(msg);
+  }
+  if (stamped_command_debug_publisher_ != nullptr) {
+    std_msgs_stamped::msg::StampedUInt8MultiArray msg{};
+    msg.header.stamp = stamp;
+    msg.header.frame_id.clear();
+    msg.layout = std_msgs::msg::MultiArrayLayout{};
+    msg.data = payload;
+    stamped_command_debug_publisher_->publish(msg);
+  }
+}
+
+void PiperGripperHardware::publish_sent_position_value(double position)
+{
+  if (!publish_sent_position_) {
+    return;
+  }
+  if (sent_position_publisher_ != nullptr) {
+    std_msgs::msg::Float64 msg{};
+    msg.data = position;
+    sent_position_publisher_->publish(msg);
+  }
+  if (stamped_sent_position_publisher_ != nullptr) {
+    std_msgs_stamped::msg::StampedFloat64 msg{};
+    msg.header.stamp = clock_->now();
+    msg.header.frame_id.clear();
+    msg.data = position;
+    stamped_sent_position_publisher_->publish(msg);
+  }
+}
+
+void PiperGripperHardware::publish_feedback_position_frame(const can_frame& frame)
+{
+  if (!publish_feedback_position_) {
+    return;
+  }
+  const auto payload = frame_to_debug_payload(frame);
+  const auto stamp = clock_->now();
+  if (feedback_position_publisher_ != nullptr) {
+    std_msgs::msg::UInt8MultiArray msg{};
+    msg.data = payload;
+    feedback_position_publisher_->publish(msg);
+  }
+  if (stamped_feedback_position_publisher_ != nullptr) {
+    std_msgs_stamped::msg::StampedUInt8MultiArray msg{};
+    msg.header.stamp = stamp;
+    msg.header.frame_id.clear();
+    msg.layout = std_msgs::msg::MultiArrayLayout{};
+    msg.data = payload;
+    stamped_feedback_position_publisher_->publish(msg);
+  }
 }
 
 }  // namespace piper_gripper_hardware
