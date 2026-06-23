@@ -1,0 +1,41 @@
+name: ROS Jazzy CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - alexzhang1030-piper-gripper-hardware-interface-jazzy
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    container:
+      image: ros:jazzy-ros-base
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            python3-colcon-common-extensions \
+            python3-rosdep \
+            python3-vcstool \
+            build-essential
+
+      - name: Initialize rosdep
+        run: |
+          rosdep init 2>/dev/null || true
+          rosdep update
+
+      - name: Install ROS package dependencies
+        run: |
+          rosdep install --from-paths . --ignore-src -r -y --rosdistro jazzy
+
+      - name: Build
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          colcon build --event-handlers console_direct+ --packages-select piper_gripper_hardware
