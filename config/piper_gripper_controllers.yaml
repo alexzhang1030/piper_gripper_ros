@@ -1,0 +1,15 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 200
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    gripper_position_controller:
+      type: forward_command_controller/ForwardCommandController
+
+gripper_position_controller:
+  ros__parameters:
+    joints:
+      - gripper_joint
+    interface_name: position

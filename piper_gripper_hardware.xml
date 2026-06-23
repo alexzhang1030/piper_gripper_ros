@@ -1,0 +1,8 @@
+<library path="piper_gripper_hardware">
+  <class
+    name="piper_gripper_hardware/PiperGripperHardware"
+    type="piper_gripper_hardware::PiperGripperHardware"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>Piper gripper ros2_control hardware interface over raw CAN.</description>
+  </class>
+</library>
